@@ -14,12 +14,9 @@ export class NitroEnclavesAcmStreamline {
   private readonly config: NitroEnclavesAcmStreamlineConfig;
   private certificateArn: string = '';
 
-  constructor(config: Partial<NitroEnclavesAcmStreamlineConfig> = {}) {
+  constructor(config: NitroEnclavesAcmStreamlineConfig) {
     this.app = new cdk.App();
-    this.config = {
-      ...getDefaultConfig(),
-      ...config
-    };
+    this.config = config;
     ConfigValidator.validate(this.config);
   }
 
@@ -31,7 +28,8 @@ export class NitroEnclavesAcmStreamline {
         hostedZoneId: this.config.certificateConfig.hostedZoneId,
         isPrivate: this.config.certificateConfig.isPrivate,
         pcaArn: this.config.certificateConfig.pcaArn,
-        certificateName: this.config.certificateConfig.certificateName,
+        certificateName: this.config.certificateConfig.certificateName || 'AcmneCertificate',
+        validationType: this.config.certificateConfig.validationType,
       });
       this.certificateArn = certificateStack.certificateArn;
     } else {
@@ -43,14 +41,13 @@ export class NitroEnclavesAcmStreamline {
     return new RoleStack(this.app, 'RoleStack', {
       env: this.getEnv(),
       certificateArn: this.certificateArn,
-      region: this.config.region,
-      roleName: this.config.roleConfig?.roleName,
+      roleName: this.config.roleConfig?.roleName || 'AcmneRole',
     });
   }
 
   private createInstanceStack(roleStack: RoleStack): InstanceStack {
     return new InstanceStack(
-      this.app, 
+      this.app,
       `InstanceStack-${this.config.instanceConfig.amiType}-${this.config.instanceConfig.serverType}`,
       {
         env: this.getEnv(),
@@ -59,17 +56,18 @@ export class NitroEnclavesAcmStreamline {
         serverType: this.config.instanceConfig.serverType,
         amiType: this.config.instanceConfig.amiType,
         instanceType: this.config.instanceConfig.instanceType,
-        instanceName: this.config.instanceConfig.instanceName,
+        instanceName: this.config.instanceConfig.instanceName || 'AcmneInstance',
         certificateArn: this.certificateArn,
-        domainName: this.config.certificateConfig.domainName
+        domainName: this.config.certificateConfig.domainName,
+        isCertificatePrivate: this.config.certificateConfig.isPrivate,
       }
     );
   }
 
   private getEnv(): { account: string; region: string } {
-    return { 
-      account: this.config.account, 
-      region: this.config.region 
+    return {
+      account: this.config.account,
+      region: this.config.region
     };
   }
 
@@ -81,6 +79,5 @@ export class NitroEnclavesAcmStreamline {
   }
 }
 
-// Usage
-const streamline = new NitroEnclavesAcmStreamline();
+const streamline = new NitroEnclavesAcmStreamline(getDefaultConfig());
 streamline.deploy();

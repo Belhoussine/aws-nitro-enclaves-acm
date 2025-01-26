@@ -18,6 +18,7 @@ interface InstanceStackProps extends cdk.StackProps {
   instanceType: string;
   certificateArn: string;
   domainName: string;
+  isCertificatePrivate: boolean;
 }
 
 export class InstanceStack extends cdk.Stack {
@@ -40,7 +41,6 @@ export class InstanceStack extends cdk.Stack {
     if (!props?.instanceType) {
       throw new Error('instanceType is required in InstanceStack.')
     }
-    // [TODO] validate instanceType to check if 1. it's a valid instance type and 2. supports enclaves
 
     // Step 2: Prepare the enclave-enabled parent instance
     const vpc = ec2.Vpc.fromLookup(this, `DefaultVPC-${props.instanceName}`, { isDefault: true })
@@ -56,11 +56,7 @@ export class InstanceStack extends cdk.Stack {
     securityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(443), 'Allow HTTPS Access');
 
     // Configure user data (startup commands) based on AMI type and server type
-    const userDataScriptsFolder = 'src/assets/user-data-scripts'
-    const configCommands = readFileSync(`${userDataScriptsFolder}/${props.amiType}/${props.serverType.toLowerCase()}-conf.sh`, 'utf8')
-      .replace('CERTIFICATE_ARN_PLACEHOLDER', props.certificateArn)
-      .replace('DOMAIN_NAME_PLACEHOLDER', props.domainName)
-    const userData = ec2.UserData.custom(configCommands);
+    const userData = ec2.UserData.custom(this.getUserDataConfig(props));
 
     // Configure instance type
     const instanceType = new ec2.InstanceType(props.instanceType);
@@ -77,7 +73,7 @@ export class InstanceStack extends cdk.Stack {
     const instanceProfile = new iam.InstanceProfile(this, `AcmInstanceProfile-${props.instanceName}`, { role: role });
 
     // Step 2 & Step 6 - Create the enclave-enabled instance with the attached role/instance profile
-    const instance = new ec2.Instance(this, props?.instanceName || `AcmneInstance`, {
+    const instance = new ec2.Instance(this, props?.instanceName!, {
       instanceType: instanceType,
       machineImage: machineImage,
       vpc: vpc,
@@ -97,5 +93,14 @@ export class InstanceStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'serverType', { value: props?.serverType })
     new cdk.CfnOutput(this, 'amiType', { value: props?.amiType })
     new cdk.CfnOutput(this, 'SSH connection string', { value: `ssh -i ${props?.keyPairName!}.pem ec2-user@${instance.instancePublicDnsName}` });
+  }
+  // Get commands for user data 
+  private getUserDataConfig(props: InstanceStackProps, userDataScriptsFolder: string = 'src/assets/user-data-scripts'): string {
+    const mainConfig = readFileSync(`${userDataScriptsFolder}/${props.amiType}/${props.serverType.toLowerCase()}-conf.sh`, 'utf8')
+    const privateCertConfig = props.isCertificatePrivate ? readFileSync(`${userDataScriptsFolder}/private-cert-conf.sh`, 'utf8') : ''
+    const combinedConfig = `${mainConfig}\n${privateCertConfig}`
+      .replaceAll('CERTIFICATE_ARN_PLACEHOLDER', props.certificateArn)
+      .replaceAll('DOMAIN_NAME_PLACEHOLDER', props.domainName)
+    return combinedConfig
   }
 }
