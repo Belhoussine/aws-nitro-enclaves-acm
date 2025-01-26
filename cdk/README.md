@@ -58,7 +58,7 @@ The app consists of **three** main CDK stacks:
 ### Installation
 ```bash
 git clone <repository-url>
-cd aws-nitro-enclaves-acm/streamline
+cd aws-nitro-enclaves-acm/cdk
 npm install
 cdk bootstrap aws://<AWS_ACCOUNT>/<AWS_REGION>
 chmod +x ./acmne-cli
