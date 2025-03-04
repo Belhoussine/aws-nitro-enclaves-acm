@@ -4,6 +4,8 @@ import * as iam from 'aws-cdk-lib/aws-iam'
 import { Construct } from 'constructs';
 import { readFileSync } from 'fs';
 
+import { CertificateConfig } from '../config/types';
+
 /*
   Step 2 - Prepare the enclave-enabled parent instance: https://docs.aws.amazon.com/enclaves/latest/user/install-acm.html#prepare-instance
   Step 6 - Attach the role to the instance: https://docs.aws.amazon.com/enclaves/latest/user/install-acm.html#instance-role
@@ -16,9 +18,7 @@ interface InstanceStackProps extends cdk.StackProps {
   serverType: 'NGINX' | 'APACHE';
   amiType: 'AL2' | 'AL2023';
   instanceType: string;
-  certificateArn: string;
-  domainName: string;
-  isCertificatePrivate: boolean;
+  certificates: CertificateConfig[];
   encryptVolume: boolean;
   allowSSHPort: boolean;
 }
@@ -43,7 +43,8 @@ export class InstanceStack extends cdk.Stack {
     }
 
     // Configure user data (startup commands) based on AMI type and server type
-    const userData = ec2.UserData.custom(this.getUserDataConfig(props));
+    const userData = this.getUserData(props)
+    console.log(userData)
 
     // Configure instance type
     const instanceType = new ec2.InstanceType(props.instanceType);
@@ -90,19 +91,57 @@ export class InstanceStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'keyPairName', { value: props?.keyPairName });
     new cdk.CfnOutput(this, 'serverType', { value: props?.serverType })
     new cdk.CfnOutput(this, 'amiType', { value: props?.amiType })
-    if (props.allowSSHPort){
-      new cdk.CfnOutput(this, 'SSH connection string', { value: `ssh -i ${props?.keyPairName!}.pem ec2-user@${instance.instancePublicDnsName}` });
-    } else {
-      new cdk.CfnOutput(this, 'AWS SSM connection string', { value: `aws ssm start-session --target ${instance.instanceId}` });
-    }
+    new cdk.CfnOutput(this, 'SSH connection string', { value: `ssh -i ${props?.keyPairName!}.pem ec2-user@${instance.instancePublicDnsName}` });
+    // Output certificate information
+    props.certificates.forEach((cert, index) => {
+      new cdk.CfnOutput(this, `Certificate-${index}`, {
+        value: `Domain: ${cert.domainName}, Private: ${cert.isPrivate}`
+      });
+    });
   }
+
   // Get commands for user data
-  private getUserDataConfig(props: InstanceStackProps, userDataScriptsFolder: string = 'src/assets/user-data-scripts'): string {
-    const mainConfig = readFileSync(`${userDataScriptsFolder}/${props.amiType}/${props.serverType.toLowerCase()}-conf.sh`, 'utf8')
-    const privateCertConfig = props.isCertificatePrivate ? readFileSync(`${userDataScriptsFolder}/private-cert-conf.sh`, 'utf8') : ''
-    const combinedConfig = `${mainConfig}\n${privateCertConfig}`
-      .replaceAll('CERTIFICATE_ARN_PLACEHOLDER', props.certificateArn)
-      .replaceAll('DOMAIN_NAME_PLACEHOLDER', props.domainName)
-    return combinedConfig
+  private getUserData(props: InstanceStackProps, baseFolder: string = 'src/assets/user-data-scripts'): ec2.UserData {
+    const userData = ec2.UserData.forLinux()
+    let combinedConfig = '';
+    const userDataScriptsFolder = `${baseFolder}/${props.amiType}/${props.serverType}`
+
+    // Add install dependencies script
+    combinedConfig += readFileSync(`${userDataScriptsFolder}/install-dependencies.sh`, 'utf8');
+
+    // Add ACM base configuration in /etc/nitro_enclaves/acm.yaml
+    combinedConfig += readFileSync(`${userDataScriptsFolder}/acm/base.sh`, 'utf8');
+
+    // Update web server config
+    combinedConfig += readFileSync(`${userDataScriptsFolder}/conf/base.sh`, 'utf8')
+      .replaceAll('DOMAIN_NAME_PLACEHOLDER', props.certificates.map(c => c.domainName).join(' '))
+
+    props.certificates.forEach((cert, index) => {
+      // Add label for each certificate in /etc/nitro_enclaves/acm.yaml file
+      combinedConfig += readFileSync(`${userDataScriptsFolder}/acm/label.sh`, 'utf8')
+      .replaceAll('CERTIFICATE_ARN_PLACEHOLDER', cert.existingCertificateArn!)
+      .replaceAll('INDEX_PLACEHOLDER', `${index + 1}`);
+
+      // Update web server config
+      combinedConfig += readFileSync(`${userDataScriptsFolder}/conf/stanza.sh`, 'utf8')
+      .replaceAll('DOMAIN_NAME_PLACEHOLDER', cert.domainName)
+      .replaceAll('INDEX_PLACEHOLDER', `${index + 1}`);
+
+      // Add domainName to /etc/hosts if private cert
+      if (cert.isPrivate) {
+        combinedConfig += readFileSync(`${baseFolder}/private-cert-conf.sh`, 'utf8')
+          .replaceAll('DOMAIN_NAME_PLACEHOLDER', cert.domainName);
+      }
+    });
+
+    // Add OpenSSL configuration
+    combinedConfig += readFileSync(`${userDataScriptsFolder}/openssl-conf.sh`, 'utf8');
+
+    // Start ACM service
+    combinedConfig += readFileSync(`${baseFolder}/start-acm-service.sh`, 'utf8') ;
+
+    userData.addCommands(...combinedConfig.split('\n'))
+
+    return userData
   }
 }

@@ -68,13 +68,17 @@ const options = program.opts<{
 const config: NitroEnclavesAcmStreamlineConfig = {
   certificateConfig: {
     stackName: `${options.setupName!}-CertificateStack`,
-    domainName: options.domainName!,
-    isPrivate: options.isPrivate || false,
-    certificateName: options.certificateName || 'AcmneCertificate',
-    existingCertificateArn: options.certificateArn,
-    hostedZoneId: options.hostedZoneId,
-    validationType: options.validationType,
-    pcaArn: options.pcaArn,
+    certificates: [
+      {
+        domainName: options.domainName!,
+        isPrivate: options.isPrivate || false,
+        certificateName: options.certificateName || 'AcmneCertificate',
+        existingCertificateArn: options.certificateArn,
+        hostedZoneId: options.hostedZoneId,
+        validationType: options.validationType,
+        pcaArn: options.pcaArn,
+      }
+    ]
   },
   roleConfig: {
     stackName: `${options.setupName!}-RoleStack`,

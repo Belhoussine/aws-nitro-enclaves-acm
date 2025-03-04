@@ -12,7 +12,7 @@ import { Construct } from 'constructs';
 
 interface RoleStackProps extends cdk.StackProps {
     roleName?: string;
-    certificateArn: string;
+    certificateArns: string[];
 }
 
 export class RoleStack extends cdk.Stack {
@@ -26,30 +26,36 @@ export class RoleStack extends cdk.Stack {
             assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
         });
 
-        // Step 4 - Associate the certificate with the ACM role
-        const enclaveCertificateIamRoleAssociation = new ec2.CfnEnclaveCertificateIamRoleAssociation(this, `EnclaveCertificateIamRoleAssociation-${props?.roleName}`, {
-            certificateArn: `${props?.certificateArn!}`,
-            roleArn: `${role.roleArn}`,
+        // Step 4 - Associate all the certificates with the ACM role
+        const certificateAssociations = props?.certificateArns.map((certArn, index) => {
+            return new ec2.CfnEnclaveCertificateIamRoleAssociation(this, `EnclaveCertificateIamRoleAssociation-${index}`, {
+                certificateArn: certArn,
+                roleArn: role.roleArn,
+            });
         });
 
         // Step 5 - Grant the ACM role permission to access the certificate and encryption key
-        role.addToPolicy(new iam.PolicyStatement({
-            effect: iam.Effect.ALLOW,
-            actions: ['s3:GetObject'],
-            resources: [`arn:aws:s3:::${enclaveCertificateIamRoleAssociation.attrCertificateS3BucketName}/*`],
-        }));
+        certificateAssociations?.forEach((association, index) => {
+            // Grant S3 access for certificate
+            role.addToPolicy(new iam.PolicyStatement({
+                effect: iam.Effect.ALLOW,
+                actions: ['s3:GetObject'],
+                resources: [`arn:aws:s3:::${association.attrCertificateS3BucketName}/*`],
+            }));
 
-        role.addToPolicy(new iam.PolicyStatement({
-            sid: 'VisualEditor0',
-            effect: iam.Effect.ALLOW,
-            actions: ['kms:Decrypt'],
-            resources: [`arn:aws:kms:${props?.env?.region}:*:key/${enclaveCertificateIamRoleAssociation.attrEncryptionKmsKeyId}`],
-        }));
+            // Grant KMS access for certificate
+            role.addToPolicy(new iam.PolicyStatement({
+                sid: `VisualEditor${index}`,
+                effect: iam.Effect.ALLOW,
+                actions: ['kms:Decrypt'],
+                resources: [`arn:aws:kms:${props?.env?.region}:*:key/${association.attrEncryptionKmsKeyId}`],
+            }));
+        });
 
         role.addToPolicy(new iam.PolicyStatement({
             effect: iam.Effect.ALLOW,
             actions: ['iam:GetRole'],
-            resources: [`${role.roleArn}`],
+            resources: [role.roleArn],
         }));
 
         // Create Instance Profile from the role
@@ -62,10 +68,12 @@ export class RoleStack extends cdk.Stack {
         new cdk.CfnOutput(this, 'ACMRoleName', { value: role.roleName });
         new cdk.CfnOutput(this, 'ACMRoleArn', { value: role.roleArn });
 
-        // ACM Certificate / Role association outputs
-        new cdk.CfnOutput(this, 'CertificateS3BucketName', { value: enclaveCertificateIamRoleAssociation.attrCertificateS3BucketName });
-        new cdk.CfnOutput(this, 'CertificateS3ObjectKey', { value: enclaveCertificateIamRoleAssociation.attrCertificateS3ObjectKey });
-        new cdk.CfnOutput(this, 'EncryptionKmsKeyId', { value: enclaveCertificateIamRoleAssociation.attrEncryptionKmsKeyId });
+        // ACM Certificate / Role association outputs for each certificate
+        certificateAssociations?.forEach((association, index) => {
+            new cdk.CfnOutput(this, `CertificateS3BucketName-${index}`, { value: association.attrCertificateS3BucketName });
+            new cdk.CfnOutput(this, `CertificateS3ObjectKey-${index}`, { value: association.attrCertificateS3ObjectKey });
+            new cdk.CfnOutput(this, `EncryptionKmsKeyId-${index}`, { value: association.attrEncryptionKmsKeyId });
+        });
     }
 }
 

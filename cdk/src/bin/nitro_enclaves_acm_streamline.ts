@@ -5,7 +5,8 @@ import { RoleStack } from '../lib/role-stack';
 import { InstanceStack } from '../lib/instance-stack';
 import { getDefaultConfig } from '../config/default-config';
 import { ConfigValidator } from '../config/config-validator';
-import { NitroEnclavesAcmStreamlineConfig } from '../config/types';
+import { NitroEnclavesAcmStreamlineConfig, CertificateConfig } from '../config/types';
+import { Certificate } from 'crypto';
 
 require('dotenv').config();
 
@@ -13,7 +14,7 @@ export class NitroEnclavesAcmStreamline {
   private readonly app: cdk.App;
   private readonly config: NitroEnclavesAcmStreamlineConfig;
   private readonly isDestroySubcommand: boolean;
-  private certificateArn: string = '';
+  private certificates: CertificateConfig[] = [];
 
   constructor(config: NitroEnclavesAcmStreamlineConfig, isDestroySubcommand: boolean = false) {
     this.app = new cdk.App();
@@ -23,23 +24,42 @@ export class NitroEnclavesAcmStreamline {
   }
 
   private createCertificateStack(): void {
-    if (!this.config.certificateConfig?.existingCertificateArn) {
+    // Handle existing certificates first
+    this.config.certificateConfig.certificates.forEach(certConfig => {
+      if (certConfig.existingCertificateArn) {
+        this.certificates.push({
+          existingCertificateArn: certConfig.existingCertificateArn,
+          domainName: certConfig.domainName,
+          isPrivate: certConfig.isPrivate,
+        })
+      }
+    });
+
+    // Create new certificates if needed
+    const certificatesToCreate = this.config.certificateConfig.certificates.filter(
+      cert => !cert.existingCertificateArn
+    );
+
+    if (certificatesToCreate.length > 0) {
       ConfigValidator.validateCertificateStack(this.config, this.isDestroySubcommand);
+      
       const certificateStack = new CertificateStack(
         this.app,
         this.config.certificateConfig.stackName || 'CertificateStack',
         {
           env: this.getEnv(),
-          domainName: this.config.certificateConfig.domainName,
-          hostedZoneId: this.config.certificateConfig.hostedZoneId,
-          isPrivate: this.config.certificateConfig.isPrivate,
-          pcaArn: this.config.certificateConfig.pcaArn,
-          certificateName: this.config.certificateConfig.certificateName || 'AcmneCertificate',
-          validationType: this.config.certificateConfig.validationType,
+          certificates: certificatesToCreate
+        }
+      );
+
+      // Add newly created certificates to the certificates array
+      certificateStack.certificateArns.forEach((arn, index) => {
+        this.certificates.push({
+          existingCertificateArn: arn,
+          domainName: certificatesToCreate[index].domainName,
+          isPrivate: certificatesToCreate[index].isPrivate
         });
-      this.certificateArn = certificateStack.certificateArn;
-    } else {
-      this.certificateArn = this.config.certificateConfig.existingCertificateArn;
+      });
     }
   }
 
@@ -50,7 +70,7 @@ export class NitroEnclavesAcmStreamline {
       this.config.roleConfig?.stackName || 'RoleStack',
       {
         env: this.getEnv(),
-        certificateArn: this.certificateArn,
+        certificateArns: this.certificates.map(cert => cert.existingCertificateArn!),
         roleName: this.config.roleConfig?.roleName || 'AcmneRole',
       });
   }
@@ -68,9 +88,7 @@ export class NitroEnclavesAcmStreamline {
         amiType: this.config.instanceConfig.amiType,
         instanceType: this.config.instanceConfig.instanceType,
         instanceName: this.config.instanceConfig.instanceName || 'AcmneInstance',
-        certificateArn: this.certificateArn,
-        domainName: this.config.certificateConfig.domainName,
-        isCertificatePrivate: this.config.certificateConfig.isPrivate,
+        certificates: this.certificates,
         encryptVolume: this.config.instanceConfig.encryptVolume,
         allowSSHPort: this.config.instanceConfig.allowSSHPort,
       }

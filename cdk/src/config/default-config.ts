@@ -7,19 +7,29 @@ export const getDefaultConfig = (): NitroEnclavesAcmStreamlineConfig => ({
   // Certificate Configuration
   certificateConfig: {
     stackName: 'CertificateStack',
-    certificateName: 'AcmneCertificate',
-    domainName: process.env.DOMAIN_NAME || 'example.com',
-    isPrivate: true,
+    certificates: [
+      {
+        certificateName: 'AcmneCertificate1',
+        domainName: process.env.DOMAIN_NAME_1 || 'example1.com',
+        isPrivate: true,
+        // If using an existing ACM certificate
+        // existingCertificateArn: process.env.CERTIFICATE_ARN || 'arn:aws:acm:my-region-1:123456789:certificate/xxx-yyyy',
 
-    // If using an existing ACM certificate
-    // existingCertificateArn: process.env.CERTIFICATE_ARN || 'arn:aws:acm:my-region-1:123456789:certificate/xxx-yyyy',
+        // If creating a public certificate
+        // hostedZoneId: process.env.HOSTED_ZONE_ID || 'Z123456789', // If Route53 is the DNS provider
+        // validationType: 'DNS', // If using an external DNS provider
 
-    // If creating a public certificate
-    // hostedZoneId: process.env.HOSTED_ZONE_ID || 'Z123456789', // If Route53 is the DNS provider
-    // validationType: 'DNS', // If using an external DNS provider
-
-    // If creating a private certificate
-    pcaArn: process.env.PCA_ARN || 'arn:aws:acm-pca:us-east-1:123456789:certificate-authority/xxx-yyyy',
+        // If creating a private certificate
+        pcaArn: process.env.PCA_ARN || 'arn:aws:acm-pca:us-east-1:123456789:certificate-authority/xxx-yyyy',
+      },
+      {
+        certificateName: 'AcmneCertificate2',
+        domainName: process.env.DOMAIN_NAME_2 || 'example2.com',
+        isPrivate: true,
+        pcaArn: process.env.PCA_ARN || 'arn:aws:acm-pca:us-east-1:123456789:certificate-authority/xxx-yyyy',
+      },
+      // Add more certificates as needed
+    ],
   },
 
   // Role Configration
